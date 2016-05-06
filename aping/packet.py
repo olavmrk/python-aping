@@ -421,7 +421,7 @@ class Tcp(_StructHelper):
 
     def __bytes__(self):
         header = super().__bytes__()
-        return header + self.options + self.payload
+        return header + self.options + self.data
 
     @classmethod
     def from_ipv4(cls, ipv4_packet, allow_partial=False):
