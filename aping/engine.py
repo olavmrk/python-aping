@@ -132,6 +132,11 @@ class PingEngine(object):
         return future
 
     def _lookup(self, target):
+        # We manually check for the presence of `target` here in order to avoid
+        # a memory leak. If we don't check, the defaultdict backing `self._listeners`
+        # will add a new set-object fot every target we try to look up.
+        if not target in self._listeners:
+            return set()
         return self._listeners[target]
 
     def _lookup_icmp(self, source_address, identifier, sequence_number):
