@@ -49,18 +49,7 @@ class PingEngine(object):
         monitor = self._loop.create_task(self._monitor_socket(sock))
         self._receive_monitors[key] = monitor
 
-    def _get_transmit_socket(self, family, protocol):
-        # First make sure that we have receivers set up to receive
-        # data from the selected protcol
-        self._ensure_receiver(family, protocol)
-        if protocol != socket.IPPROTO_ICMP:
-            # Even if the protocol is TCP or UDP, we may receive
-            # errors using the ICMP Protocol
-            self._ensure_receiver(family, socket.IPPROTO_ICMP)
-
-        # Now ensure that we have an output socket.
-        # These are using IPPROTO_RAW and is therefore shared for all
-        # protocols in a given family
+    def _get_transmit_socket(self, family):
         if not family in self._transmit_sockets:
             # No socket present -- create one
             sock = socket.socket(family, socket.SOCK_RAW, socket.IPPROTO_RAW)
@@ -70,6 +59,14 @@ class PingEngine(object):
         return self._transmit_sockets[family]
 
     def _listener_future(self, target):
+        # Make sure that we are ready to receive packets from this target.
+        protocol = target[0]
+        self._ensure_receiver(socket.AF_INET, protocol)
+        if protocol != socket.IPPROTO_ICMP:
+            # If the protocol is TCP or UDP, we may receive
+            # errors using the ICMP Protocol
+            self._ensure_receiver(family, socket.IPPROTO_ICMP)
+
         future = asyncio.Future()
         # Attach the queue to the packet listeners
         self._listeners[target].add(future)
@@ -140,15 +137,15 @@ class PingEngine(object):
         request_packet.embed_payload(payload)
         request_packet.calculate_checksum()
         request_packet = bytes(request_packet)
-        return (socket.IPPROTO_ICMP, target_tuple, request_packet)
+        return (target_tuple, request_packet)
 
     def ping(self, target, timeout=10.0, ttl=255, ping_type='icmp', **kwargs):
         if not isinstance(target, ipaddress.IPv4Address):
             raise ValueError('target must be a IPv4Address')
 
-        protocol, target_tuple, request_packet = self._prepare_ping(target, ttl, ping_type, **kwargs)
+        target_tuple, request_packet = self._prepare_ping(target, ttl, ping_type, **kwargs)
         response_future = self._listener_future(target_tuple)
-        sock = self._get_transmit_socket(socket.AF_INET, protocol)
+        sock = self._get_transmit_socket(socket.AF_INET)
         sock.sendto(request_packet, (str(target), 0))
         sent = time.clock_gettime(time.CLOCK_MONOTONIC)
         self._loop.call_later(timeout, response_future.cancel)
