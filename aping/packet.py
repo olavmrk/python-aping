@@ -325,7 +325,7 @@ class Tcp(_StructHelper):
         ('destination_port', 0),
         ('sequence_number', 0),
         ('acknowledgment_number', 0),
-        ('data_offset', 0),
+        ('data_offset', 5),
         ('reserved', 0),
         ('ns', False),
         ('cwr', False),
