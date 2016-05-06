@@ -118,7 +118,7 @@ class PingEngine(object):
         if protocol != socket.IPPROTO_ICMP:
             # If the protocol is TCP or UDP, we may receive
             # errors using the ICMP Protocol
-            self._ensure_receiver(family, socket.IPPROTO_ICMP)
+            self._ensure_receiver(socket.AF_INET, socket.IPPROTO_ICMP)
 
         future = asyncio.Future()
         # Attach the queue to the packet listeners
