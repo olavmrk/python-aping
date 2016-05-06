@@ -423,6 +423,12 @@ class Tcp(_StructHelper):
         header = super().__bytes__()
         return header + self.options + self.data
 
+    def calculate_checksum(self, source_address, destination_address):
+        self.checksum = 0
+        data = bytes(self)
+        pseudo_header = source_address.packed + destination_address.packed + struct.pack('>BBH', 0, 6, len(data))
+        self.checksum = _calculate_checksum(pseudo_header + data)
+
     @classmethod
     def from_ipv4(cls, ipv4_packet, allow_partial=False):
         data = ipv4_packet.payload
