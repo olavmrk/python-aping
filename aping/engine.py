@@ -19,6 +19,13 @@ class PingTimeoutError(PingError):
     def __init__(self):
         super().__init__('Timeout')
 
+class PingTimeExceededError(PingError):
+    def __init__(self, rtt, response):
+        self.rtt = rtt
+        self.source = response.source_address
+        self.response = response
+        super().__init__('TTL expired from {address}'.format(address=str(self.source)))
+
 class PingResponse(PingResult):
     def __init__(self, rtt, response):
         self.rtt = rtt
@@ -85,9 +92,27 @@ class PingEngine(object):
         target = (socket.IPPROTO_ICMP, source_address, identifier, sequence_number)
         return self._lookup(target)
 
+    def _find_inner_payload_futures(self, outer_payload):
+        try:
+            protocol_header = outer_payload.extract_payload()
+            address = protocol_header.destination_address
+            payload = protocol_header.extract_payload(allow_partial=True)
+        except:
+            # Not enough data in the packet to identify it.
+            return set()
+        # Now we have the payload we just sent in `payload` and its destination in
+        # address. Find out what kind of packet this was and try to match it to our
+        # listeners.
+        if isinstance(payload, packet.IcmpEchoRequest):
+            return self._lookup_icmp(address, payload.identifier, payload.sequence_number)
+        else:
+            return set() # Unknown payload type
+
     def _find_payload_futures(self, source_address, payload):
         if isinstance(payload, packet.IcmpEchoReply):
             return self._lookup_icmp(source_address, payload.identifier, payload.sequence_number)
+        elif isinstance(payload, packet.IcmpTimeExceeded):
+            return self._find_inner_payload_futures(payload)
         else:
             return set() # Unknown payload type
 
@@ -154,4 +179,8 @@ class PingEngine(object):
         except asyncio.CancelledError:
             raise PingTimeoutError() from None
         rtt = received - sent
-        return PingResponse(rtt, response)
+        payload = response.extract_payload()
+        if isinstance(payload, packet.IcmpTimeExceeded):
+            raise PingTimeExceededError(rtt, response)
+        else:
+            return PingResponse(rtt, response)

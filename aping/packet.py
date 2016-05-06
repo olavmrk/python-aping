@@ -242,6 +242,7 @@ class Icmp(_StructHelper):
         type_map = {
             0: IcmpEchoReply,
             8: IcmpEchoRequest,
+            11: IcmpTimeExceeded,
         }
         icmp_type = type_map.get(icmp_type, IcmpUnknown)
         return icmp_type.from_bytes(data, allow_partial)
@@ -277,6 +278,19 @@ class IcmpEchoRequest(Icmp):
         ('sequence_number', 0),
         ('payload', b''),
     )
+
+class IcmpTimeExceeded(Icmp):
+    STRUCT_FIELDS = Icmp.STRUCT_FIELDS + (
+        ('unused', 'I'),
+        ('payload', '*s'),
+    )
+    INIT_FIELDS = Icmp._init_fields(11) + (
+        ('unused', 0),
+        ('payload', b''),
+    )
+
+    def extract_payload(self):
+        return IPv4.from_bytes(self.payload, allow_partial=True)
 
 class Tcp(_StructHelper):
     STRUCT_FIELDS = (
