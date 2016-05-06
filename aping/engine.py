@@ -30,6 +30,48 @@ class PingTimeExceededError(PingError):
         self.response = response
         super().__init__('TTL expired from {address}'.format(address=str(self.source)))
 
+class PingDestinationUnreachableError(PingError):
+    MESSAGES = {
+        # IPv4 errors, from:
+        # http://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml#icmp-parameters-codes-3
+        (4,  0): 'Net Unreachable',
+        (4,  1): 'Host Unreachable',
+        (4,  2): 'Protocol Unreachable',
+        (4,  3): 'Port Unreachable',
+        (4,  4): 'Fragmentation Needed and Don\'t Fragment was Set',
+        (4,  5): 'Source Route Failed',
+        (4,  6): 'Destination Network Unknown',
+        (4,  7): 'Destination Host Unknown',
+        (4,  8): 'Source Host Isolated',
+        (4,  9): 'Communication with Destination Network is Administratively Prohibited',
+        (4, 10): 'Communication with Destination Host is Administratively Prohibited',
+        (4, 11): 'Destination Network Unreachable for Type of Service',
+        (4, 12): 'Destination Host Unreachable for Type of Service',
+        (4, 13): 'Communication Administratively Prohibited',
+        (4, 14): 'Host Precedence Violation',
+        (4, 15): 'Precedence cutoff in effect',
+        # IPv6 errors, from:
+        # http://www.iana.org/assignments/icmpv6-parameters/icmpv6-parameters.xhtml#icmpv6-parameters-codes-2
+        (6,  0): 'No route to destination',
+        (6,  1): 'Communication with destination administratively prohibited',
+        (6,  2): 'Beyond scope of source address',
+        (6,  3): 'Address unreachable',
+        (6,  4): 'Port unreachable',
+        (6,  5): 'Source address failed ingress/egress policy',
+        (6,  6): 'Reject route to destination',
+        (6,  7): 'Error in Source Routing Header',
+    }
+
+    def __init__(self, rtt, response):
+        self.rtt = rtt
+        self.source = response.source_address
+        self.protocol = response.version
+        self.code = (response.version, response.extract_payload().code)
+        self.response = response
+        msg = PingDestinationUnreachableError.MESSAGES.get(self.code, 'Unknown error')
+        msg = '[{protocol},{code}] {msg}'.format(protocol=self.code[0], code=self.code[1], msg=msg)
+        super().__init__('Destination unreachable ({msg}) from {address}'.format(msg=msg, address=str(self.source)))
+
 class PingResponse(PingResult):
     def __init__(self, rtt, response):
         self.rtt = rtt
@@ -117,6 +159,8 @@ class PingEngine(object):
             return self._lookup_icmp(source_address, payload.identifier, payload.sequence_number)
         elif isinstance(payload, packet.IcmpTimeExceeded):
             return self._find_inner_payload_futures(payload)
+        elif isinstance(payload, packet.IcmpDestinationUnreachable):
+            return self._find_inner_payload_futures(payload)
         else:
             return set() # Unknown payload type
 
@@ -190,5 +234,7 @@ class PingEngine(object):
         payload = response.extract_payload()
         if isinstance(payload, packet.IcmpTimeExceeded):
             raise PingTimeExceededError(rtt, response)
+        elif isinstance(payload, packet.IcmpDestinationUnreachable):
+            raise PingDestinationUnreachableError(rtt, response)
         else:
             return PingResponse(rtt, response)

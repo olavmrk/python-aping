@@ -241,6 +241,7 @@ class Icmp(_StructHelper):
         icmp_type = data[0]
         type_map = {
             0: IcmpEchoReply,
+            3: IcmpDestinationUnreachable,
             8: IcmpEchoRequest,
             11: IcmpTimeExceeded,
         }
@@ -266,6 +267,21 @@ class IcmpEchoReply(Icmp):
         ('sequence_number', 0),
         ('payload', b''),
     )
+
+class IcmpDestinationUnreachable(Icmp):
+    STRUCT_FIELDS = Icmp.STRUCT_FIELDS + (
+        ('unused', 'H'),
+        ('next_hop_mtu', 'H'),
+        ('payload', '*s'),
+    )
+    INIT_FIELDS = Icmp._init_fields(3) + (
+        ('unused', 0),
+        ('next_hop_mtu', 0),
+        ('payload', b''),
+    )
+
+    def extract_payload(self):
+        return IPv4.from_bytes(self.payload, allow_partial=True)
 
 class IcmpEchoRequest(Icmp):
     STRUCT_FIELDS = Icmp.STRUCT_FIELDS + (
