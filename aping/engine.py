@@ -15,6 +15,10 @@ class PingResult(object):
 class PingError(Exception):
     pass
 
+class PingTransmitError(PingError):
+    def __str__(self):
+        return 'Transmit error: ' + str(self.__cause__)
+
 class PingTimeoutError(PingError):
     def __init__(self):
         super().__init__('Timeout')
@@ -171,7 +175,11 @@ class PingEngine(object):
         target_tuple, request_packet = self._prepare_ping(target, ttl, ping_type, **kwargs)
         response_future = self._listener_future(target_tuple)
         sock = self._get_transmit_socket(socket.AF_INET)
-        sock.sendto(request_packet, (str(target), 0))
+        try:
+            sock.sendto(request_packet, (str(target), 0))
+        except OSError as e:
+            response_future.cancel()
+            raise PingTransmitError() from e
         sent = time.clock_gettime(time.CLOCK_MONOTONIC)
         self._loop.call_later(timeout, response_future.cancel)
         try:
