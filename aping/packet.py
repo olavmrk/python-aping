@@ -382,7 +382,7 @@ class Tcp(_StructHelper):
         if self.fin:
             ret |= 0b00000001
         return ret
-    @_struct_misc.setter
+    @_struct_flags.setter
     def _struct_flags(self, value):
         if value is not None:
             self.cwr = bool(value & 0b10000000)
