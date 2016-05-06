@@ -138,6 +138,10 @@ class PingEngine(object):
         target = (socket.IPPROTO_ICMP, source_address, identifier, sequence_number)
         return self._lookup(target)
 
+    def _lookup_tcp(self, destination_address, source_port, destination_port, sequence_number):
+        target = (socket.IPPROTO_TCP, destination_address, source_port, destination_port, sequence_number)
+        return self._lookup(target)
+
     def _find_inner_payload_futures(self, outer_payload):
         try:
             protocol_header = outer_payload.extract_payload()
@@ -151,6 +155,8 @@ class PingEngine(object):
         # listeners.
         if isinstance(payload, packet.IcmpEchoRequest):
             return self._lookup_icmp(address, payload.identifier, payload.sequence_number)
+        elif isinstance(payload, packet.Tcp):
+            return self._lookup_tcp(address, payload.source_port, payload.destination_port, payload.sequence_number)
         else:
             return set() # Unknown payload type
 
@@ -161,6 +167,9 @@ class PingEngine(object):
             return self._find_inner_payload_futures(payload)
         elif isinstance(payload, packet.IcmpDestinationUnreachable):
             return self._find_inner_payload_futures(payload)
+        elif isinstance(payload, packet.Tcp):
+            sequence_number = (payload.acknowledgment_number - 1) & 0xffffffff
+            return self._lookup_tcp(source_address, payload.destination_port, payload.source_port, sequence_number)
         else:
             return set() # Unknown payload type
 
@@ -181,6 +190,12 @@ class PingEngine(object):
         finally:
             sock.close()
 
+    def _get_source_address(self, target):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect( (str(target), 0) )
+            source_address, source_port = s.getsockname()
+            return ipaddress.ip_address(source_address)
+
     def _prepare_icmp(self, target, identifier=None, sequence_number=None, payload=b''):
         if identifier is None:
             identifier = os.getpid() & 0xffff
@@ -199,9 +214,30 @@ class PingEngine(object):
         target_tuple = (socket.IPPROTO_ICMP, target, identifier, sequence_number)
         return (target_tuple, icmp)
 
+    def _prepare_tcp(self, target, source_port=None, destination_port=80):
+        if source_port is None:
+            source_port = random.randrange(32768, 33792)
+        while True:
+            sequence_number = random.randrange(0x100000000)
+            if self._lookup_tcp(target, source_port, destination_port, sequence_number):
+                # Something else is already using this sequence number
+                continue
+            break
+        tcp = packet.Tcp()
+        tcp.source_port = source_port
+        tcp.destination_port = destination_port
+        tcp.sequence_number = sequence_number
+        tcp.syn = True
+        tcp.window_size = 2048
+        tcp.calculate_checksum(self._get_source_address(target), target)
+        target_tuple = (socket.IPPROTO_TCP, target, source_port, destination_port, sequence_number)
+        return (target_tuple, tcp)
+
     def _prepare_ping(self, target, ttl, ping_type, **kwargs):
         if ping_type == 'icmp':
             target_tuple, payload = self._prepare_icmp(target, **kwargs)
+        elif ping_type == 'tcp':
+            target_tuple, payload = self._prepare_tcp(target, **kwargs)
         else:
             raise NotImplementedError('Unknown ping type: {ping_type}'.format(ping_type=ping_type))
         request_packet = packet.IPv4()

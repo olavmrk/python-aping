@@ -11,6 +11,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Ping a host')
     parser.add_argument('target', help='Target host')
     parser.add_argument('--ttl', type=int, default=255, help='TTL on sent packets')
+    parser.add_argument('--tcp', action='store_true', help='TCP mode')
+    parser.add_argument('--dport', type=int, default=80, help='Destination port')
     return parser.parse_args()
 
 def lookup(target):
@@ -25,10 +27,17 @@ def lookup(target):
 def main():
     args = parse_args()
     address = lookup(args.target)
+    kwargs = {}
+    if args.tcp:
+        kwargs = {
+            'ping_type': 'tcp',
+            'destination_port': args.dport,
+        }
+
     print('Sending ping to {host} [{address}]:'.format(host=args.target, address=address))
     loop = asyncio.get_event_loop()
     try:
-        result = loop.run_until_complete(aping.ping(ipaddress.ip_address(address), timeout=1, ttl=args.ttl))
+        result = loop.run_until_complete(aping.ping(ipaddress.ip_address(address), timeout=1, ttl=args.ttl, **kwargs))
         print('Got response in {rtt:.2f} ms'.format(rtt=result.rtt*1000))
     except aping.PingError as e:
         print('Error:', e)
