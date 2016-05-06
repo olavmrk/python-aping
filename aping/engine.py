@@ -29,24 +29,45 @@ class PingEngine(object):
 
     def __init__(self):
         self._loop = asyncio.get_event_loop()
-        self._sockets = {}
+        self._receive_monitors = {}
+        self._transmit_sockets = {}
         self._listeners = collections.defaultdict(set)
 
     def close(self):
-        for sock, monitor in self._sockets.values():
+        for monitor in self._receive_monitors.values():
             monitor.cancel()
+        for sock in self._transmit_sockets.values():
+            sock.close()
 
-    def _get_socket(self, family, protocol):
+    def _ensure_receiver(self, family, protocol):
         key = (family, protocol)
-        if key in self._sockets:
-            sock, monitor = self._sockets[key]
-            return sock
+        if key in self._receive_monitors:
+            return
         sock = socket.socket(family, socket.SOCK_RAW, protocol)
         sock.setblocking(False)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
         monitor = self._loop.create_task(self._monitor_socket(sock))
-        self._sockets[key] = (sock, monitor)
-        return sock
+        self._receive_monitors[key] = monitor
+
+    def _get_transmit_socket(self, family, protocol):
+        # First make sure that we have receivers set up to receive
+        # data from the selected protcol
+        self._ensure_receiver(family, protocol)
+        if protocol != socket.IPPROTO_ICMP:
+            # Even if the protocol is TCP or UDP, we may receive
+            # errors using the ICMP Protocol
+            self._ensure_receiver(family, socket.IPPROTO_ICMP)
+
+        # Now ensure that we have an output socket.
+        # These are using IPPROTO_RAW and is therefore shared for all
+        # protocols in a given family
+        if not family in self._transmit_sockets:
+            # No socket present -- create one
+            sock = socket.socket(family, socket.SOCK_RAW, socket.IPPROTO_RAW)
+            sock.setblocking(False)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+            self._transmit_sockets[family] = sock
+        return self._transmit_sockets[family]
 
     def _listener_future(self, target):
         future = asyncio.Future()
@@ -127,7 +148,7 @@ class PingEngine(object):
 
         protocol, target_tuple, request_packet = self._prepare_ping(target, ttl, ping_type, **kwargs)
         response_future = self._listener_future(target_tuple)
-        sock = self._get_socket(socket.AF_INET, protocol)
+        sock = self._get_transmit_socket(socket.AF_INET, protocol)
         sock.sendto(request_packet, (str(target), 0))
         sent = time.clock_gettime(time.CLOCK_MONOTONIC)
         self._loop.call_later(timeout, response_future.cancel)
