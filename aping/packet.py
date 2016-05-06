@@ -343,6 +343,8 @@ class Tcp(_StructHelper):
         ('data', b''),
     )
 
+    ipv4_protocol = 6
+
     @property
     def _struct_misc(self):
         ret = (self.data_offset << 4) | (self.reserved << 1)
