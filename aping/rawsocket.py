@@ -7,19 +7,16 @@ import time
 
 from . import packet
 
-class RawSocket(object):
+class _RawReceiver(object):
 
     def __init__(self):
         self._loop = asyncio.get_event_loop()
         self._receive_monitors = {}
-        self._transmit_sockets = {}
         self._listeners = collections.defaultdict(set)
 
     def close(self):
         for monitor in self._receive_monitors.values():
             monitor.cancel()
-        for sock in self._transmit_sockets.values():
-            sock.close()
 
     def _ensure_receiver(self, family, protocol):
         key = (family, protocol)
@@ -30,15 +27,6 @@ class RawSocket(object):
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
         monitor = self._loop.create_task(self._monitor_socket(sock))
         self._receive_monitors[key] = monitor
-
-    def _get_transmit_socket(self, family):
-        if not family in self._transmit_sockets:
-            # No socket present -- create one
-            sock = socket.socket(family, socket.SOCK_RAW, socket.IPPROTO_RAW)
-            sock.setblocking(False)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-            self._transmit_sockets[family] = sock
-        return self._transmit_sockets[family]
 
     def listener_future(self, target):
         # Make sure that we are ready to receive packets from this target.
@@ -124,12 +112,6 @@ class RawSocket(object):
         finally:
             sock.close()
 
-    def get_source_address(self, target):
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect( (str(target), 0) )
-            source_address, source_port = s.getsockname()
-            return ipaddress.ip_address(source_address)
-
     def find_free_icmp_sequence_number(self, target, identifier):
         while True:
             sequence_number = random.randrange(0x10000)
@@ -145,6 +127,44 @@ class RawSocket(object):
                 # Something else is already using this sequence number
                 continue
             return sequence_number
+
+
+class RawSocket(object):
+
+    def __init__(self):
+        self._loop = asyncio.get_event_loop()
+        self._receiver = _RawReceiver()
+        self._transmit_sockets = {}
+        self._listeners = collections.defaultdict(set)
+
+    def close(self):
+        self._receiver.close()
+        for sock in self._transmit_sockets.values():
+            sock.close()
+
+    def _get_transmit_socket(self, family):
+        if not family in self._transmit_sockets:
+            # No socket present -- create one
+            sock = socket.socket(family, socket.SOCK_RAW, socket.IPPROTO_RAW)
+            sock.setblocking(False)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+            self._transmit_sockets[family] = sock
+        return self._transmit_sockets[family]
+
+    def listener_future(self, target):
+        return self._receiver.listener_future(target)
+
+    def get_source_address(self, target):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect( (str(target), 0) )
+            source_address, source_port = s.getsockname()
+            return ipaddress.ip_address(source_address)
+
+    def find_free_icmp_sequence_number(self, target, identifier):
+        return self._receiver.find_free_icmp_sequence_number(target, identifier)
+
+    def find_free_tcp_sequence_number(self, target, source_port, destination_port):
+        return self._receiver.find_free_tcp_sequence_number(target, source_port, destination_port)
 
     def send(self, raw_packet):
         destination_address = raw_packet[16:20]
