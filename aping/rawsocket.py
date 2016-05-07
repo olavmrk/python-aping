@@ -11,22 +11,23 @@ class _RawReceiver(object):
 
     def __init__(self):
         self._loop = asyncio.get_event_loop()
-        self._receive_monitors = {}
+        self._receive_sockets = {}
         self._listeners = collections.defaultdict(set)
 
     def close(self):
-        for monitor in self._receive_monitors.values():
-            monitor.cancel()
+        for receive_socket in self._receive_sockets.values():
+            self._loop.remove_reader(receive_socket.fileno())
+            receive_socket.close()
 
     def _ensure_receiver(self, family, protocol):
         key = (family, protocol)
-        if key in self._receive_monitors:
+        if key in self._receive_sockets:
             return
         sock = socket.socket(family, socket.SOCK_RAW, protocol)
         sock.setblocking(False)
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-        monitor = self._loop.create_task(self._monitor_socket(sock))
-        self._receive_monitors[key] = monitor
+        self._loop.add_reader(sock.fileno(), self._receive, sock)
+        self._receive_sockets[key] = sock
 
     def listener_future(self, target):
         # Make sure that we are ready to receive packets from this target.
@@ -95,22 +96,17 @@ class _RawReceiver(object):
         else:
             return set() # Unknown payload type
 
-    @asyncio.coroutine
-    def _monitor_socket(self, sock):
+    def _receive(self, sock):
+        response = sock.recv(65536)
+        ts = time.clock_gettime(time.CLOCK_MONOTONIC)
         try:
-            while True:
-                response = yield from self._loop.sock_recv(sock, 65536)
-                ts = time.clock_gettime(time.CLOCK_MONOTONIC)
-                try:
-                    response = packet.IPv4.from_bytes(response)
-                    payload = response.extract_payload()
-                except:
-                    continue # Invalid response
-                futures = self._find_payload_futures(response.source_address, payload)
-                for future in futures:
-                    future.set_result((ts, response))
-        finally:
-            sock.close()
+            response = packet.IPv4.from_bytes(response)
+            payload = response.extract_payload()
+        except:
+            return # Invalid response
+        futures = self._find_payload_futures(response.source_address, payload)
+        for future in futures:
+            future.set_result((ts, response))
 
     def find_free_icmp_sequence_number(self, target, identifier):
         while True:
