@@ -4,13 +4,13 @@ import ipaddress
 import socket
 import time
 
-from . import dispatcher
-from . import packet
+from . import _dispatcher
+from . import _packet
 
 class _RawReceiver(object):
 
-    def __init__(self, _dispatcher):
-        self._dispatcher = _dispatcher
+    def __init__(self, dispatcher):
+        self._dispatcher = dispatcher
         self._loop = asyncio.get_event_loop()
         self._receive_sockets = {}
 
@@ -39,7 +39,7 @@ class RawSocket(object):
 
     def __init__(self):
         self._loop = asyncio.get_event_loop()
-        self._dispatcher = dispatcher.ReceiveDispatcher()
+        self._dispatcher = _dispatcher.ReceiveDispatcher()
         self._receiver = _RawReceiver(self._dispatcher)
         self._transmit_sockets = {}
         self._listeners = collections.defaultdict(set)

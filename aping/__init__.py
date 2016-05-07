@@ -2,8 +2,8 @@ import asyncio
 import ipaddress
 import socket
 
-from .packet import (Icmp, IcmpEchoRequest, IPv4, Tcp)
-from .engine import PingEngine, PingError
+from ._packet import (Icmp, IcmpEchoRequest, IPv4, Tcp)
+from ._engine import PingEngine, PingError
 
 @asyncio.coroutine
 def ping(target, **kwargs):

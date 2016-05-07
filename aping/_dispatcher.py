@@ -4,7 +4,7 @@ import random
 import socket
 import struct
 
-from . import packet
+from . import _packet
 
 class ReceiveDispatcher(object):
 
@@ -67,7 +67,7 @@ class ReceiveDispatcher(object):
         if protocol_listeners is None:
             return
         try:
-            response = packet.IPv4.from_bytes(raw_packet)
+            response = _packet.IPv4.from_bytes(raw_packet)
             payload = response.extract_payload()
         except:
             return # Invalid response

@@ -5,8 +5,8 @@ import os
 import random
 import socket
 
-from . import packet
-from . import rawsocket
+from . import _packet
+from . import _rawsocket
 
 class PingResult(object):
     pass
@@ -81,13 +81,13 @@ class PingEngine(object):
 
     def __init__(self):
         self._loop = asyncio.get_event_loop()
-        self._rawsocket = rawsocket.RawSocket()
+        self._rawsocket = _rawsocket.RawSocket()
 
     def close(self):
         self._rawsocket.close()
 
     def _prepare_icmp(self, target, payload=b''):
-        icmp = packet.IcmpEchoRequest()
+        icmp = _packet.IcmpEchoRequest()
         icmp.identifier = os.getpid() & 0xffff
         icmp.sequence_number = self._rawsocket.find_free_icmp_sequence_number(target, icmp.identifier)
         icmp.payload = payload
@@ -99,7 +99,7 @@ class PingEngine(object):
         if source_port is None:
             source_port = random.randrange(32768, 33792)
         sequence_number = self._rawsocket.find_free_tcp_sequence_number(target, source_port, destination_port)
-        tcp = packet.Tcp()
+        tcp = _packet.Tcp()
         tcp.source_port = source_port
         tcp.destination_port = destination_port
         tcp.sequence_number = sequence_number
@@ -116,7 +116,7 @@ class PingEngine(object):
             target_tuple, payload = self._prepare_tcp(target, **kwargs)
         else:
             raise NotImplementedError('Unknown ping type: {ping_type}'.format(ping_type=ping_type))
-        request_packet = packet.IPv4()
+        request_packet = _packet.IPv4()
         request_packet.destination_address = target
         request_packet.time_to_live = ttl
         request_packet.embed_payload(payload)
@@ -142,9 +142,9 @@ class PingEngine(object):
             raise PingTimeoutError() from None
         rtt = received - sent
         payload = response.extract_payload()
-        if isinstance(payload, packet.IcmpTimeExceeded):
+        if isinstance(payload, _packet.IcmpTimeExceeded):
             raise PingTimeExceededError(rtt, response)
-        elif isinstance(payload, packet.IcmpDestinationUnreachable):
+        elif isinstance(payload, _packet.IcmpDestinationUnreachable):
             raise PingDestinationUnreachableError(rtt, response)
         else:
             return PingResponse(rtt, response)
