@@ -7,37 +7,12 @@ import time
 
 from . import packet
 
-class _RawReceiver(object):
+class _ReceiveDispatcher(object):
 
     def __init__(self):
-        self._loop = asyncio.get_event_loop()
-        self._receive_sockets = {}
         self._listeners = collections.defaultdict(set)
 
-    def close(self):
-        for receive_socket in self._receive_sockets.values():
-            self._loop.remove_reader(receive_socket.fileno())
-            receive_socket.close()
-
-    def _ensure_receiver(self, family, protocol):
-        key = (family, protocol)
-        if key in self._receive_sockets:
-            return
-        sock = socket.socket(family, socket.SOCK_RAW, protocol)
-        sock.setblocking(False)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
-        self._loop.add_reader(sock.fileno(), self._receive, sock)
-        self._receive_sockets[key] = sock
-
     def listener_future(self, target):
-        # Make sure that we are ready to receive packets from this target.
-        protocol = target[0]
-        self._ensure_receiver(socket.AF_INET, protocol)
-        if protocol != socket.IPPROTO_ICMP:
-            # If the protocol is TCP or UDP, we may receive
-            # errors using the ICMP Protocol
-            self._ensure_receiver(socket.AF_INET, socket.IPPROTO_ICMP)
-
         future = asyncio.Future()
         # Attach the queue to the packet listeners
         self._listeners[target].add(future)
@@ -96,9 +71,7 @@ class _RawReceiver(object):
         else:
             return set() # Unknown payload type
 
-    def _receive(self, sock):
-        response = sock.recv(65536)
-        ts = time.clock_gettime(time.CLOCK_MONOTONIC)
+    def dispatch(self, response, timestamp):
         try:
             response = packet.IPv4.from_bytes(response)
             payload = response.extract_payload()
@@ -106,7 +79,7 @@ class _RawReceiver(object):
             return # Invalid response
         futures = self._find_payload_futures(response.source_address, payload)
         for future in futures:
-            future.set_result((ts, response))
+            future.set_result((timestamp, response))
 
     def find_free_icmp_sequence_number(self, target, identifier):
         while True:
@@ -125,11 +98,40 @@ class _RawReceiver(object):
             return sequence_number
 
 
+class _RawReceiver(object):
+
+    def __init__(self, dispatcher):
+        self._dispatcher = dispatcher
+        self._loop = asyncio.get_event_loop()
+        self._receive_sockets = {}
+
+    def close(self):
+        for receive_socket in self._receive_sockets.values():
+            self._loop.remove_reader(receive_socket.fileno())
+            receive_socket.close()
+
+    def ensure_receiver(self, family, protocol):
+        key = (family, protocol)
+        if key in self._receive_sockets:
+            return
+        sock = socket.socket(family, socket.SOCK_RAW, protocol)
+        sock.setblocking(False)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+        self._loop.add_reader(sock.fileno(), self._receive, sock)
+        self._receive_sockets[key] = sock
+
+    def _receive(self, sock):
+        response = sock.recv(65536)
+        ts = time.clock_gettime(time.CLOCK_MONOTONIC)
+        self._dispatcher.dispatch(response, ts)
+
+
 class RawSocket(object):
 
     def __init__(self):
         self._loop = asyncio.get_event_loop()
-        self._receiver = _RawReceiver()
+        self._dispatcher = _ReceiveDispatcher()
+        self._receiver = _RawReceiver(self._dispatcher)
         self._transmit_sockets = {}
         self._listeners = collections.defaultdict(set)
 
@@ -148,7 +150,14 @@ class RawSocket(object):
         return self._transmit_sockets[family]
 
     def listener_future(self, target):
-        return self._receiver.listener_future(target)
+        # Make sure that we are ready to receive packets from this target.
+        protocol = target[0]
+        self._receiver.ensure_receiver(socket.AF_INET, protocol)
+        if protocol != socket.IPPROTO_ICMP:
+            # If the protocol is TCP or UDP, we may receive
+            # errors using the ICMP Protocol
+            self._receiver.ensure_receiver(socket.AF_INET, socket.IPPROTO_ICMP)
+        return self._dispatcher.listener_future(target)
 
     def get_source_address(self, target):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -157,10 +166,10 @@ class RawSocket(object):
             return ipaddress.ip_address(source_address)
 
     def find_free_icmp_sequence_number(self, target, identifier):
-        return self._receiver.find_free_icmp_sequence_number(target, identifier)
+        return self._dispatcher.find_free_icmp_sequence_number(target, identifier)
 
     def find_free_tcp_sequence_number(self, target, source_port, destination_port):
-        return self._receiver.find_free_tcp_sequence_number(target, source_port, destination_port)
+        return self._dispatcher.find_free_tcp_sequence_number(target, source_port, destination_port)
 
     def send(self, raw_packet):
         destination_address = raw_packet[16:20]
