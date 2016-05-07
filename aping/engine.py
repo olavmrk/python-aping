@@ -86,18 +86,13 @@ class PingEngine(object):
     def close(self):
         self._rawsocket.close()
 
-    def _prepare_icmp(self, target, identifier=None, sequence_number=None, payload=b''):
-        if identifier is None:
-            identifier = os.getpid() & 0xffff
-        if sequence_number is None:
-            sequence_number = self._rawsocket.find_free_icmp_sequence_number(target, identifier)
-
+    def _prepare_icmp(self, target, payload=b''):
         icmp = packet.IcmpEchoRequest()
-        icmp.identifier = identifier
-        icmp.sequence_number = sequence_number
+        icmp.identifier = os.getpid() & 0xffff
+        icmp.sequence_number = self._rawsocket.find_free_icmp_sequence_number(target, icmp.identifier)
         icmp.payload = payload
         icmp.calculate_checksum()
-        target_tuple = (socket.IPPROTO_ICMP, target, identifier, sequence_number)
+        target_tuple = (socket.IPPROTO_ICMP, target, icmp.identifier, icmp.sequence_number)
         return (target_tuple, icmp)
 
     def _prepare_tcp(self, target, source_port=None, destination_port=80):
